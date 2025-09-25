@@ -1,4 +1,3 @@
-
 function getUserCB(id, cb) {
     setTimeout(() => cb(null, { id, name: "User" + id }), 200);
 }
@@ -23,16 +22,23 @@ function getRecsCB(userId, cb) {
 function promisify(fn) {
     return function (...args) {
       return new Promise((resolve, reject) => {
-        fn(...args, (err, data) => err ? reject(err) : resolve(data));
+        // Вызываем оригинальную функцию, передавая ей все аргументы
+        // и наш собственный колбэк, который управляет промисом.
+        fn(...args, (err, data) => {
+          if (err) {
+            return reject(err);
+          }
+          resolve(data);
+        });
       });
     };
 }
 
 
 // TODO: create wrappers using promisify
-const getUserP   = /* TODO */ null;
-const getOrdersP = /* TODO */ null;
-const getRecsP   = /* TODO */ null;
+const getUserP   = promisify(getUserCB);
+const getOrdersP = promisify(getOrdersCB);
+const getRecsP   = promisify(getRecsCB);
 
 /* ──────────────────────────────────────────────────────────────────────────
    - After fetching user and orders, INSERT a step that rejects with
@@ -42,15 +48,22 @@ const getRecsP   = /* TODO */ null;
 ────────────────────────────────────────────────────────────────────────── */
 function runSequential() {
     console.log("— SEQUENTIAL —");
+    let userCache; // Переменная для хранения пользователя между шагами
     return getUserP(1)
         .then(user => {
+            userCache = user;
             console.log("user:", user);
-            return getOrdersP(user.id).then(orders => ({ user, orders }));
+            return getOrdersP(user.id);
         })
-        .then(({ user, orders }) => {
-            // TODO: business-rule failure here
-
-            throw new Error("TODO: add business-rule check & continue chain");
+        .then(orders => {
+            // Проверка бизнес-правила: если заказов нет, выбрасываем ошибку
+            if (orders.length === 0) {
+                throw new Error("No orders");
+            }
+            // Если всё хорошо, получаем рекомендации и передаём всё дальше
+            return getRecsP(userCache.id).then(recommendations => {
+                return { user: userCache, orders, recommendations };
+            });
         })
         .then(({ user, orders, recommendations }) => {
             console.log("final (sequential):", { user, orders, recommendations });
@@ -73,9 +86,15 @@ function runParallel() {
     console.log("— PARALLEL —");
     return getUserP(2)
         .then(user => {
-            // TODO: run both in parallel using Promise.all and then log result
-
-            throw new Error("TODO: implement Promise.all fan-out");
+            console.log("user:", user);
+            // Запускаем оба запроса одновременно и ждём их завершения
+            return Promise.all([
+                getOrdersP(user.id),
+                getRecsP(user.id)
+            ]).then(([orders, recommendations]) => {
+                // Когда оба промиса разрешатся, собираем результат в один объект
+                return { user, orders, recommendations };
+            });
         })
         .then(({ user, orders, recommendations }) => {
             console.log("final (parallel):", { user, orders, recommendations });
@@ -95,10 +114,14 @@ Optional -- Promise.race demo
 ────────────────────────────────────────────────────────────────────────── */
 function runRaceOptional() {
     console.log("— RACE (optional) —");
-    const p1 = new Promise(res => setTimeout(() => res("p1"), 120));
-    const p2 = new Promise(res => setTimeout(() => res("p2"), 60));
-    // TODO:practice  Promise.race return then (winner as console.log("race winner:", winner));
-    console.log("TODO: implement Promise.race");
+    const p1 = new Promise(res => setTimeout(() => res("p1 wins"), 120));
+    const p2 = new Promise(res => setTimeout(() => res("p2 wins"), 60));
+    
+    // Promise.race вернёт результат самого быстрого промиса (p2)
+    Promise.race([p1, p2])
+        .then(winner => {
+            console.log("race winner:", winner);
+        });
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
